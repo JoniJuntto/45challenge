@@ -12,8 +12,10 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 p-6 md:p-8 pt-6 md:pt-8 overflow-auto">
-        {children}
+      <main className="flex-1 p-4 md:p-6 pt-4 md:pt-6 overflow-auto">
+        <div className="max-w-7xl mx-auto">
+          {children}
+        </div>
       </main>
       <Toaster />
       <Sonner />
