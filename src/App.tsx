@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import TasksPage from "./pages/TasksPage";
 import ProgressPage from "./pages/ProgressPage";
 import JournalPage from "./pages/JournalPage";
+import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 import { useEffect } from "react";
 
@@ -31,6 +32,7 @@ const App = () => {
               <Route path="/tasks" element={<AppLayout><TasksPage /></AppLayout>} />
               <Route path="/progress" element={<AppLayout><ProgressPage /></AppLayout>} />
               <Route path="/journal" element={<AppLayout><JournalPage /></AppLayout>} />
+              <Route path="/auth" element={<AuthPage />} />
               {/* Calendar and Settings pages to be implemented later */}
               <Route path="*" element={<NotFound />} />
             </Routes>

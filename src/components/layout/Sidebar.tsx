@@ -1,6 +1,6 @@
 
-import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { 
   Calendar, 
@@ -9,13 +9,43 @@ import {
   FileText, 
   Settings, 
   Menu, 
-  Home
+  Home,
+  LogIn,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { User } from "@supabase/supabase-js";
+import { toast } from "sonner";
 
 export const Sidebar = () => {
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setUser(session?.user ?? null);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      toast.success('Logged out successfully');
+      navigate('/');
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
 
   const navItems = [
     { 
@@ -99,14 +129,24 @@ export const Sidebar = () => {
             "flex items-center",
             collapsed ? "justify-center" : "px-3"
           )}>
-            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-              <span className="text-xs font-medium">UI</span>
-            </div>
-            {!collapsed && (
-              <div className="ml-3">
-                <p className="text-sm font-medium">User</p>
-                <p className="text-xs text-muted-foreground">Day 1 of 45</p>
-              </div>
+            {user ? (
+              <Button 
+                variant="ghost" 
+                className="w-full" 
+                onClick={handleLogout}
+              >
+                <LogOut className="w-5 h-5 mr-2" />
+                {!collapsed && "Logout"}
+              </Button>
+            ) : (
+              <Button 
+                variant="ghost" 
+                className="w-full" 
+                onClick={() => navigate('/auth')}
+              >
+                <LogIn className="w-5 h-5 mr-2" />
+                {!collapsed && "Login"}
+              </Button>
             )}
           </div>
         </div>
@@ -114,3 +154,5 @@ export const Sidebar = () => {
     </aside>
   );
 };
+
+export default Sidebar;
