@@ -1,22 +1,25 @@
-
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { User, Session } from "@supabase/supabase-js";
+import type { TablesInsert, TablesUpdate, Tables } from "@/integrations/supabase/types";
 
 export interface Task {
   id: string;
   title: string;
   description: string;
+  icon?: React.ReactNode;
   type: "checkbox" | "counter" | "timer" | "text";
   completed: boolean;
   value?: number | string;
   maxValue?: number;
-  icon?: React.ReactNode;
 }
+
+interface StoredTask extends Omit<Task, 'icon'> {}
 
 interface DailyProgress {
   date: string;
-  tasks: Task[];
+  tasks: StoredTask[];
   completed: boolean;
   day: number;
 }
@@ -32,7 +35,7 @@ interface ChallengeState {
 
 interface ChallengeContextType {
   challengeState: ChallengeState;
-  user: any;
+  user: User | null;
   isLoading: boolean;
   startChallenge: () => void;
   saveDailyProgress: (date: string, tasks: Task[]) => void;
@@ -50,276 +53,293 @@ const initialState: ChallengeState = {
 
 const ChallengeContext = createContext<ChallengeContextType | undefined>(undefined);
 
-export const ChallengeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const calculateStreak = (progress: Record<string, DailyProgress>): number => {
+    let streak = 0;
+    const sortedDates = Object.keys(progress).sort();
+    if (sortedDates.length === 0) return 0;
+
+    const today = new Date();
+    let currentDate = new Date(today);
+
+    for (let i = 0; i < 45; i++) {
+        const dateStrToFind = currentDate.toISOString().split('T')[0];
+        const dayData = progress[dateStrToFind];
+
+        if (dayData && dayData.completed) {
+            streak++;
+        } else {
+            const todayStr = today.toISOString().split('T')[0];
+            if (dateStrToFind === todayStr && !dayData && Object.keys(progress).length > 0) {
+                
+            } else {
+                break;
+            }
+        }
+
+        currentDate.setDate(currentDate.getDate() - 1);
+    }
+    return streak;
+};
+
+const convertSupabaseRowToTasks = (taskRow: Tables<'daily_tasks'>): StoredTask[] => {
+      return [
+        {
+          id: "mindfulness",
+          title: "Mindfulness Session",
+          description: "Take a few minutes to meditate and clear your mind.",
+          type: "timer",
+          completed: taskRow.mindfulness_completed ?? false,
+          value: taskRow.mindfulness_value ?? 0,
+        },
+        {
+          id: "growth",
+          title: "Growth Content",
+          description: "Read or listen to content that helps you grow.",
+          type: "text",
+          completed: taskRow.reading_completed ?? false,
+          value: taskRow.reading_notes ?? "",
+        },
+        {
+          id: "hydration",
+          title: "Hydration",
+          description: "Track your water intake throughout the day.",
+          type: "counter",
+          completed: taskRow.water_consumed ?? false,
+          value: taskRow.water_glasses ?? 0,
+          maxValue: 8,
+        },
+        {
+          id: "nutrition",
+          title: "Nutrition Check",
+          description: "How are your eating habits today?",
+          type: "checkbox",
+          completed: taskRow.diet_followed ?? false,
+        },
+        {
+          id: "movement",
+          title: "Movement & Outdoors",
+          description: "30 minutes of movement with at least 15 minutes outdoors.",
+          type: "checkbox",
+          completed: taskRow.workout_1_completed ?? taskRow.workout_2_completed ?? false,
+        },
+        {
+          id: "digital",
+          title: "Digital Detox",
+          description: "Take a break from screens and disconnect.",
+          type: "checkbox",
+          completed: taskRow.digital_detox ?? false,
+        }
+      ];
+};
+
+export const ChallengeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [challengeState, setChallengeState] = useState<ChallengeState>(initialState);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [session, setSession] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
 
-  // Auth state listener
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-      }
-    );
-
-    // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      setIsLoading(false);
+    }).catch((error) => {
+        console.error("Error getting initial session:", error);
+        setIsLoading(false);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setIsLoading(false);
+      }
+    );
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load challenge data
   useEffect(() => {
     loadChallengeData();
   }, [user]);
 
-  // Function to load challenge data from Supabase or localStorage
-  const loadChallengeData = async () => {
-    setIsLoading(true);
-    
-    if (user) {
+  const syncLocalDataToSupabase = async (localData: ChallengeState, userId: string) => {
+      if (!localData.isStarted || !localData.startDate) return;
+
       try {
-        // Try to load from Supabase
-        const { data: challengeData, error } = await supabase
-          .from('challenges')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('status', 'active')
-          .single();
+          const { data: existingChallenge, error: fetchExistingError } = await supabase
+            .from('challenges')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .maybeSingle();
 
-        if (error && error.code !== 'PGRST116') {
-          throw error;
-        }
+          if (fetchExistingError) throw fetchExistingError;
 
-        if (challengeData) {
-          // Challenge exists in Supabase
-          const { data: tasksData, error: tasksError } = await supabase
-            .from('daily_tasks')
-            .select('*')
-            .eq('challenge_id', challengeData.id);
-
-          if (tasksError) throw tasksError;
-
-          // Convert Supabase data to our state format
-          const dailyProgress: Record<string, DailyProgress> = {};
-          
-          if (tasksData) {
-            tasksData.forEach((task: any) => {
-              const dateStr = new Date(task.date).toISOString().split('T')[0];
-              
-              // Create task objects based on the DB structure
-              const taskList: Task[] = [
-                {
-                  id: "mindfulness",
-                  title: "Mindfulness Session",
-                  description: "Take a few minutes to meditate and clear your mind.",
-                  type: "timer",
-                  completed: task.mindfulness_completed || false,
-                  value: task.mindfulness_value || 0,
-                },
-                {
-                  id: "growth",
-                  title: "Growth Content",
-                  description: "Read or listen to content that helps you grow.",
-                  type: "text",
-                  completed: task.reading_completed || false,
-                  value: task.reading_notes || "",
-                },
-                {
-                  id: "hydration",
-                  title: "Hydration",
-                  description: "Track your water intake throughout the day.",
-                  type: "counter",
-                  completed: task.water_consumed || false,
-                  value: task.water_glasses || 0,
-                  maxValue: 8,
-                },
-                {
-                  id: "nutrition",
-                  title: "Nutrition Check",
-                  description: "How are your eating habits today?",
-                  type: "checkbox",
-                  completed: task.diet_followed || false,
-                },
-                {
-                  id: "movement",
-                  title: "Movement & Outdoors",
-                  description: "30 minutes of movement with at least 15 minutes outdoors.",
-                  type: "checkbox",
-                  completed: task.workout_completed || false,
-                },
-                {
-                  id: "digital",
-                  title: "Digital Detox",
-                  description: "Take a break from screens and disconnect.",
-                  type: "checkbox",
-                  completed: task.digital_detox || false,
-                }
-              ];
-              
-              // Calculate if all tasks were completed
-              const allCompleted = taskList.every(t => t.completed);
-              
-              dailyProgress[dateStr] = {
-                date: dateStr,
-                tasks: taskList,
-                completed: allCompleted,
-                day: task.day_number || 0
-              };
-            });
+          if (existingChallenge) {
+            console.log("Active challenge already exists for user, skipping sync of challenge creation.");
+            return;
           }
 
-          // Calculate streak
-          const streak = calculateStreak(dailyProgress);
+          const challengeInsert: TablesInsert<'challenges'> = {
+              user_id: userId,
+              start_date: localData.startDate,
+              current_day: localData.currentDay,
+              status: 'active'
+          };
+          const { data: challenge, error: challengeError } = await supabase
+              .from('challenges')
+              .insert(challengeInsert)
+              .select()
+              .single();
 
-          setChallengeState({
-            isStarted: true,
-            currentDay: challengeData.current_day || 1,
-            startDate: challengeData.start_date,
-            dailyProgress,
-            challengeId: challengeData.id,
-            streakDays: streak
+          if (challengeError) throw challengeError;
+          if (!challenge) throw new Error("Failed to create challenge record during sync.");
+
+          const dailyTasksToInsert: TablesInsert<'daily_tasks'>[] = Object.values(localData.dailyProgress).map((day): TablesInsert<'daily_tasks'> => {
+              const waterTask = day.tasks.find(t => t.id === 'hydration');
+              const readingTask = day.tasks.find(t => t.id === 'growth');
+              const mindfulnessTask = day.tasks.find(t => t.id === 'mindfulness');
+              const nutritionTask = day.tasks.find(t => t.id === 'nutrition');
+              const movementTask = day.tasks.find(t => t.id === 'movement');
+              const digitalTask = day.tasks.find(t => t.id === 'digital');
+
+              return {
+                  challenge_id: challenge.id,
+                  date: day.date,
+                  day_number: day.day,
+                  water_consumed: waterTask?.completed ?? false,
+                  water_glasses: typeof waterTask?.value === 'number' ? waterTask.value : null,
+                  reading_completed: readingTask?.completed ?? false,
+                  reading_notes: typeof readingTask?.value === 'string' ? readingTask.value : null,
+                  mindfulness_completed: mindfulnessTask?.completed ?? false,
+                  mindfulness_value: typeof mindfulnessTask?.value === 'number' ? mindfulnessTask.value : null,
+                  diet_followed: nutritionTask?.completed ?? false,
+                  workout_1_completed: movementTask?.completed ?? false,
+                  workout_2_completed: false,
+                  digital_detox: digitalTask?.completed ?? false
+              };
           });
-        } else {
-          // Try to load from localStorage and sync if available
-          const localData = localStorage.getItem('thrive45_challenge');
-          
-          if (localData) {
-            const parsedData = JSON.parse(localData);
-            
-            // Sync local data to Supabase
-            await syncLocalDataToSupabase(parsedData, user.id);
-            
-            toast.success("Your local progress has been synced to your account!");
+
+          if (dailyTasksToInsert.length > 0) {
+              const { error: tasksError } = await supabase
+                  .from('daily_tasks')
+                  .insert(dailyTasksToInsert);
+              if (tasksError) throw tasksError;
+          }
+
+          return challenge.id;
+
+      } catch (error: unknown) {
+          console.error("Error syncing data to Supabase:", error);
+          const message = error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Failed to sync progress: ${message}`);
+          return null;
+      }
+  };
+
+  const loadChallengeData = async () => {
+    try {
+      if (user) {
+          const { data: challengeData, error: challengeError } = await supabase
+            .from('challenges')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('status', 'active')
+            .maybeSingle();
+
+          if (challengeError) throw challengeError;
+
+          if (challengeData) {
+            const { data: tasksData, error: tasksError } = await supabase
+              .from('daily_tasks')
+              .select('*')
+              .eq('challenge_id', challengeData.id);
+
+            if (tasksError) throw tasksError;
+
+            const dailyProgress: Record<string, DailyProgress> = {};
+            if (tasksData) {
+              tasksData.forEach((taskRow: Tables<'daily_tasks'>) => {
+                const dateStr = new Date(taskRow.date).toISOString().split('T')[0];
+                 if (!isNaN(new Date(taskRow.date).getTime())) {
+                    const taskList = convertSupabaseRowToTasks(taskRow);
+                    const allCompleted = taskList.every(t => t.completed);
+                    dailyProgress[dateStr] = {
+                      date: dateStr,
+                      tasks: taskList,
+                      completed: allCompleted,
+                      day: taskRow.day_number ?? 0
+                    };
+                 } else {
+                     console.warn("Skipping invalid date from Supabase task:", taskRow.date);
+                 }
+              });
+            }
+
+            const streak = calculateStreak(dailyProgress);
+            setChallengeState({
+              isStarted: true,
+              currentDay: challengeData.current_day ?? 1,
+              startDate: challengeData.start_date,
+              dailyProgress,
+              challengeId: challengeData.id,
+              streakDays: streak
+            });
           } else {
-            // No challenge data exists
+            const localData = localStorage.getItem('thrive45_challenge');
+            if (localData) {
+              try {
+                  const parsedData: ChallengeState = JSON.parse(localData);
+                  toast.info("Syncing local progress to your account...");
+                  const syncedChallengeId = await syncLocalDataToSupabase(parsedData, user.id);
+                  if (syncedChallengeId) {
+                       toast.success("Sync complete!");
+                      await loadChallengeData();
+                      return;
+                  } else {
+                      setChallengeState(parsedData);
+                       toast.error("Failed to sync. Progress remains local for now.");
+                  }
+              } catch (parseError) {
+                  console.error("Error parsing local data:", parseError);
+                  localStorage.removeItem('thrive45_challenge');
+                  setChallengeState(initialState);
+              }
+            } else {
+              setChallengeState(initialState);
+            }
+          }
+      } else {
+          const localData = localStorage.getItem('thrive45_challenge');
+          if (localData) {
+             try {
+                 setChallengeState(JSON.parse(localData));
+             } catch (parseError) {
+                 console.error("Error parsing local data:", parseError);
+                 localStorage.removeItem('thrive45_challenge');
+                 setChallengeState(initialState);
+             }
+          } else {
             setChallengeState(initialState);
           }
-        }
-      } catch (error: any) {
+      }
+    } catch (error: unknown) {
         console.error("Error loading challenge data:", error);
-        toast.error(`Failed to load your progress: ${error.message}`);
-        
-        // Fallback to localStorage
-        const localData = localStorage.getItem('thrive45_challenge');
-        if (localData) {
-          setChallengeState(JSON.parse(localData));
-        }
-      }
-    } else {
-      // Load from localStorage for non-authenticated users
-      const localData = localStorage.getItem('thrive45_challenge');
-      if (localData) {
-        setChallengeState(JSON.parse(localData));
-      }
-    }
-    
-    setIsLoading(false);
-  };
-
-  // Function to sync localStorage data to Supabase
-  const syncLocalDataToSupabase = async (localData: ChallengeState, userId: string) => {
-    if (!localData.isStarted) return;
-    
-    try {
-      // Create a challenge record
-      const { data: challenge, error: challengeError } = await supabase
-        .from('challenges')
-        .insert({
-          user_id: userId,
-          start_date: localData.startDate,
-          current_day: localData.currentDay,
-          status: 'active'
-        })
-        .select()
-        .single();
-      
-      if (challengeError) throw challengeError;
-      
-      // Insert daily task records
-      if (challenge) {
-        const dailyTasksToInsert = Object.values(localData.dailyProgress).map(day => {
-          const waterTask = day.tasks.find(t => t.id === 'hydration');
-          const readingTask = day.tasks.find(t => t.id === 'growth');
-          const mindfulnessTask = day.tasks.find(t => t.id === 'mindfulness');
-          
-          return {
-            challenge_id: challenge.id,
-            date: day.date,
-            day_number: day.day,
-            water_consumed: day.tasks.find(t => t.id === 'hydration')?.completed || false,
-            water_glasses: waterTask?.value || 0,
-            reading_completed: day.tasks.find(t => t.id === 'growth')?.completed || false,
-            reading_notes: readingTask?.value || '',
-            mindfulness_completed: day.tasks.find(t => t.id === 'mindfulness')?.completed || false,
-            mindfulness_value: mindfulnessTask?.value || 0,
-            diet_followed: day.tasks.find(t => t.id === 'nutrition')?.completed || false,
-            workout_completed: day.tasks.find(t => t.id === 'movement')?.completed || false,
-            digital_detox: day.tasks.find(t => t.id === 'digital')?.completed || false
-          };
-        });
-        
-        if (dailyTasksToInsert.length > 0) {
-          const { error: tasksError } = await supabase
-            .from('daily_tasks')
-            .insert(dailyTasksToInsert);
-            
-          if (tasksError) throw tasksError;
-        }
-        
-        // Update local state with the new challenge id
-        setChallengeState({
-          ...localData,
-          challengeId: challenge.id
-        });
-      }
-    } catch (error: any) {
-      console.error("Error syncing data to Supabase:", error);
-      toast.error(`Failed to sync your progress: ${error.message}`);
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to load progress: ${message}`);
     }
   };
 
-  // Calculate streak of consecutive completed days
-  const calculateStreak = (progress: Record<string, DailyProgress>): number => {
-    const dates = Object.keys(progress)
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-    
-    if (dates.length === 0) return 0;
-    
-    let streak = 0;
-    const today = new Date().toISOString().split('T')[0];
-    let currentDate = today;
-    
-    for (let i = 0; i < dates.length; i++) {
-      const date = dates[i];
-      const dayProgress = progress[date];
-      
-      // Check if this is today or consecutive previous days
-      if (date === currentDate && dayProgress.completed) {
-        streak++;
-        // Move to previous day
-        const prevDate = new Date(currentDate);
-        prevDate.setDate(prevDate.getDate() - 1);
-        currentDate = prevDate.toISOString().split('T')[0];
-      } else {
-        // Break streak if a day was missed or not completed
-        break;
-      }
+  useEffect(() => {
+    if (!isLoading) {
+        loadChallengeData();
     }
-    
-    return streak;
-  };
+  }, [user, isLoading]);
 
-  // Start or restart the challenge
   const startChallenge = async () => {
     const today = new Date().toISOString().split('T')[0];
-    
+
     const newState: ChallengeState = {
       isStarted: true,
       currentDay: 1,
@@ -328,198 +348,179 @@ export const ChallengeProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       challengeId: null,
       streakDays: 0
     };
-    
-    // Save to localStorage
+
+    setChallengeState(newState);
     localStorage.setItem('thrive45_challenge', JSON.stringify(newState));
-    
+    toast.success("Your 45-day challenge has begun!");
+
     if (user) {
       try {
-        // Check for existing active challenge
-        const { data: existingChallenge, error: fetchError } = await supabase
+        const { data: existingChallenge } = await supabase
           .from('challenges')
           .select('id')
           .eq('user_id', user.id)
           .eq('status', 'active')
-          .single();
-          
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
-        
+          .maybeSingle();
+
         if (existingChallenge) {
-          // Update existing challenge to "failed"
-          await supabase
+          const { error: updateError } = await supabase
             .from('challenges')
             .update({ status: 'failed' })
             .eq('id', existingChallenge.id);
+          if (updateError) console.error("Error marking previous challenge as failed:", updateError);
         }
-        
-        // Create new challenge
-        const { data: challenge, error } = await supabase
+
+        const challengeInsert: TablesInsert<'challenges'> = {
+             user_id: user.id,
+             start_date: today,
+             current_day: 1,
+             status: 'active'
+         };
+        const { data: challenge, error: insertError } = await supabase
           .from('challenges')
-          .insert({
-            user_id: user.id,
-            start_date: today,
-            current_day: 1,
-            status: 'active'
-          })
+          .insert(challengeInsert)
           .select()
           .single();
-          
-        if (error) throw error;
-        
+
+        if (insertError) throw insertError;
+
         if (challenge) {
-          newState.challengeId = challenge.id;
+          const stateWithId = { ...newState, challengeId: challenge.id };
+          setChallengeState(stateWithId);
+          localStorage.setItem('thrive45_challenge', JSON.stringify(stateWithId));
+        } else {
+            throw new Error("Failed to get challenge details after insert.");
         }
-      } catch (error: any) {
-        console.error("Error starting challenge:", error);
-        toast.error(`Failed to start challenge: ${error.message}`);
+
+      } catch (error: unknown) {
+        console.error("Error starting challenge in Supabase:", error);
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to sync new challenge start: ${message}. Progress saved locally.`);
       }
     }
-    
-    setChallengeState(newState);
-    toast.success("Your 45-day challenge has begun! Complete all tasks each day to build your streak.");
   };
 
-  // Save daily progress
   const saveDailyProgress = async (date: string, tasks: Task[]) => {
-    // Check if all tasks are completed
-    const allCompleted = tasks.every(task => task.completed);
-    
-    // Get the current date as a string
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Calculate the current day in the challenge
-    let currentDay = challengeState.currentDay;
-    
-    // If this is a new day and yesterday was completed, increment the day counter
-    if (date === today && !challengeState.dailyProgress[today]) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      
-      if (challengeState.dailyProgress[yesterdayStr]?.completed) {
-        currentDay++;
-      } else if (Object.keys(challengeState.dailyProgress).length > 0) {
-        // If we have progress but yesterday wasn't completed, we need to reset
-        return resetChallenge();
-      }
-    }
-    
-    // Update state with new progress
-    const newDailyProgress = {
+    const tasksForState: StoredTask[] = tasks.map(({ icon, ...rest }) => rest);
+    const allCompleted = tasksForState.every(task => task.completed);
+
+    const progressForStreak = {
       ...challengeState.dailyProgress,
-      [date]: {
-        date,
-        tasks,
-        completed: allCompleted,
-        day: currentDay
-      }
+      [date]: { date, tasks: tasksForState, completed: allCompleted, day: challengeState.currentDay }
     };
-    
-    const streak = calculateStreak(newDailyProgress);
-    
-    const newState = {
+    const newStreak = calculateStreak(progressForStreak);
+
+    const currentDayForRecord = challengeState.currentDay;
+
+    const newState: ChallengeState = {
       ...challengeState,
-      currentDay,
-      dailyProgress: newDailyProgress,
-      streakDays: streak
+      currentDay: currentDayForRecord,
+      dailyProgress: {
+        ...challengeState.dailyProgress,
+        [date]: {
+          date: date,
+          tasks: tasksForState,
+          completed: allCompleted,
+          day: currentDayForRecord
+        }
+      },
+      streakDays: newStreak,
     };
-    
-    // Save to localStorage
+    setChallengeState(newState);
     localStorage.setItem('thrive45_challenge', JSON.stringify(newState));
-    
-    // Save to Supabase if user is logged in
+
     if (user && challengeState.challengeId) {
       try {
-        // Update challenge current day
-        await supabase
-          .from('challenges')
-          .update({ current_day: currentDay })
-          .eq('id', challengeState.challengeId);
-        
-        // Find tasks in our state
-        const waterTask = tasks.find(t => t.id === 'hydration');
+         const waterTask = tasks.find(t => t.id === 'hydration');
         const readingTask = tasks.find(t => t.id === 'growth');
         const mindfulnessTask = tasks.find(t => t.id === 'mindfulness');
         const nutritionTask = tasks.find(t => t.id === 'nutrition');
         const movementTask = tasks.find(t => t.id === 'movement');
         const digitalTask = tasks.find(t => t.id === 'digital');
-        
-        // Check if we already have a record for this date
+
+        type DailyTaskBase = Omit<Tables<'daily_tasks'>, 'id' | 'created_at' | 'updated_at' | 'challenge_id' | 'date' | 'day_number'>;
+        const taskData: DailyTaskBase = {
+          water_consumed: waterTask?.completed ?? false,
+          water_glasses: typeof waterTask?.value === 'number' ? waterTask.value : null,
+          reading_completed: readingTask?.completed ?? false,
+          reading_notes: typeof readingTask?.value === 'string' ? readingTask.value : null,
+          mindfulness_completed: mindfulnessTask?.completed ?? false,
+          mindfulness_value: typeof mindfulnessTask?.value === 'number' ? mindfulnessTask.value : null,
+          diet_followed: nutritionTask?.completed ?? false,
+          workout_1_completed: movementTask?.completed ?? false,
+          workout_2_completed: false,
+          digital_detox: digitalTask?.completed ?? false,
+          progress_photo_taken: false,
+        };
+
         const { data: existingRecord, error: fetchError } = await supabase
           .from('daily_tasks')
           .select('id')
           .eq('challenge_id', challengeState.challengeId)
           .eq('date', date)
-          .single();
-          
-        if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
-        
-        const taskData = {
-          challenge_id: challengeState.challengeId,
-          date,
-          day_number: currentDay,
-          water_consumed: waterTask?.completed || false,
-          water_glasses: waterTask?.value || 0,
-          reading_completed: readingTask?.completed || false,
-          reading_notes: readingTask?.value || '',
-          mindfulness_completed: mindfulnessTask?.completed || false,
-          mindfulness_value: mindfulnessTask?.value || 0,
-          diet_followed: nutritionTask?.completed || false,
-          workout_completed: movementTask?.completed || false,
-          digital_detox: digitalTask?.completed || false
-        };
-        
+          .maybeSingle();
+
+        if (fetchError) throw fetchError;
+
         if (existingRecord) {
-          // Update existing record
-          const { error } = await supabase
+          const taskUpdate: TablesUpdate<'daily_tasks'> = { ...taskData };
+          const { error: updateError } = await supabase
             .from('daily_tasks')
-            .update(taskData)
+            .update(taskUpdate)
             .eq('id', existingRecord.id);
-            
-          if (error) throw error;
+          if (updateError) throw updateError;
         } else {
-          // Insert new record
-          const { error } = await supabase
+          const taskInsert: TablesInsert<'daily_tasks'> = {
+             ...taskData,
+             challenge_id: challengeState.challengeId,
+             date: date,
+             day_number: currentDayForRecord
+           };
+          const { error: insertError } = await supabase
             .from('daily_tasks')
-            .insert(taskData);
-            
-          if (error) throw error;
+            .insert(taskInsert);
+          if (insertError) throw insertError;
         }
-      } catch (error: any) {
-        console.error("Error saving challenge progress:", error);
-        toast.error(`Failed to save progress: ${error.message}`);
+
+        if (challengeState.currentDay !== currentDayForRecord) {
+            await supabase
+                .from('challenges')
+                .update({ current_day: currentDayForRecord })
+                .eq('id', challengeState.challengeId);
+        }
+
+      } catch (error: unknown) {
+        console.error("Error saving challenge progress to Supabase:", error);
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to save progress to cloud: ${message}. Progress saved locally.`);
       }
     }
-    
-    setChallengeState(newState);
-    
+
     if (allCompleted) {
       toast.success("Great job! All tasks completed for today!");
     }
   };
 
-  // Reset challenge
   const resetChallenge = async () => {
-    if (user && challengeState.challengeId) {
+    const challengeIdToReset = challengeState.challengeId;
+
+    setChallengeState(initialState);
+    localStorage.removeItem('thrive45_challenge');
+    toast.info("Challenge reset. You can start again!");
+
+    if (user && challengeIdToReset) {
       try {
-        // Mark the current challenge as failed
-        await supabase
+        const { error } = await supabase
           .from('challenges')
           .update({ status: 'failed' })
-          .eq('id', challengeState.challengeId);
-          
-        toast.info("Challenge reset. Don't worry, you can start again!");
-      } catch (error: any) {
-        console.error("Error resetting challenge:", error);
-        toast.error(`Failed to reset challenge: ${error.message}`);
+          .eq('id', challengeIdToReset);
+         if (error) throw error;
+      } catch (error: unknown) {
+        console.error("Error marking challenge as failed in Supabase:", error);
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to update challenge status in cloud: ${message}`);
       }
     }
-    
-    // Reset localStorage
-    localStorage.removeItem('thrive45_challenge');
-    
-    // Reset state
-    setChallengeState(initialState);
   };
 
   return (

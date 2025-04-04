@@ -1,4 +1,3 @@
-
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,20 +11,16 @@ import ProgressPage from "./pages/ProgressPage";
 import JournalPage from "./pages/JournalPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
-import { useEffect } from "react";
+import CalendarPage from "./pages/CalendarPage";
+import SettingsPage from "./pages/SettingsPage";
 import { ChallengeProvider } from "./contexts/ChallengeContext";
 
 const queryClient = new QueryClient();
 
 const App = () => {
-  // Force dark mode
-  useEffect(() => {
-    document.documentElement.classList.add('dark');
-  }, []);
-  
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} forcedTheme="dark">
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem={true}>
         <ChallengeProvider>
           <TooltipProvider>
             <BrowserRouter>
@@ -35,7 +30,8 @@ const App = () => {
                 <Route path="/progress" element={<AppLayout><ProgressPage /></AppLayout>} />
                 <Route path="/journal" element={<AppLayout><JournalPage /></AppLayout>} />
                 <Route path="/auth" element={<AuthPage />} />
-                {/* Calendar and Settings pages to be implemented later */}
+                <Route path="/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
+                <Route path="/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>

@@ -1,10 +1,11 @@
+"use client"; 
 
 import { useState, useEffect } from "react";
 import Sidebar from "./Sidebar";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
-import { useMobile } from "@/hooks/use-mobile";
+import useIsMobile from "@/hooks/use-mobile";
 import { AuthButtons } from "../auth/AuthButtons";
 
 interface AppLayoutProps {
@@ -12,7 +13,7 @@ interface AppLayoutProps {
 }
 
 const AppLayout = ({ children }: AppLayoutProps) => {
-  const isMobile = useMobile();
+  const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {

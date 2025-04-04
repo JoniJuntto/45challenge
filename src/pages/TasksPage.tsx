@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { 
   Brain, 
@@ -6,7 +5,8 @@ import {
   Droplets, 
   Apple, 
   Activity, 
-  PhoneOff 
+  PhoneOff,
+  LucideIcon // Import LucideIcon type
 } from "lucide-react";
 import { TaskCard } from "@/components/tasks/TaskCard";
 import { Button } from "@/components/ui/button";
@@ -16,92 +16,62 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 
+// Helper function to get the icon component based on task ID
+const getIconForTask = (taskId: string): React.ReactElement<LucideIcon> | null => {
+  switch (taskId) {
+    case "mindfulness": return <Brain className="h-5 w-5" />;
+    case "growth": return <Book className="h-5 w-5" />;
+    case "hydration": return <Droplets className="h-5 w-5" />;
+    case "nutrition": return <Apple className="h-5 w-5" />;
+    case "movement": return <Activity className="h-5 w-5" />;
+    case "digital": return <PhoneOff className="h-5 w-5" />;
+    default: return null;
+  }
+};
+
 const TasksPage = () => {
   const { challengeState, isLoading, startChallenge, saveDailyProgress } = useChallenge();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  // Task state now holds StoredTask type (without icon)
+  const [tasks, setTasks] = useState<Omit<Task, 'icon'>[]>([]); 
 
-  // Initialize the tasks when the component mounts
+  // Initialize the tasks when the component mounts or challenge state changes
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     
     if (challengeState.isStarted && challengeState.dailyProgress[today]) {
-      // Use stored tasks for today
+      // Use stored tasks for today (they don't have icons)
       setTasks(challengeState.dailyProgress[today].tasks);
+    } else if (challengeState.isStarted) {
+        // Challenge started but no tasks for today yet - initialize defaults (without icons)
+        setTasks([
+          { id: "mindfulness", title: "Mindfulness Session", description: "Meditate.", type: "timer", completed: false, value: 0 },
+          { id: "growth", title: "Growth Content", description: "Read/listen.", type: "text", completed: false, value: "" },
+          { id: "hydration", title: "Hydration", description: "Drink water.", type: "counter", completed: false, value: 0, maxValue: 8 },
+          { id: "nutrition", title: "Nutrition Check", description: "Eat well?", type: "checkbox", completed: false },
+          { id: "movement", title: "Movement & Outdoors", description: "Move.", type: "checkbox", completed: false },
+          { id: "digital", title: "Digital Detox", description: "Disconnect.", type: "checkbox", completed: false },
+        ]);
     } else {
-      // Initialize default tasks
-      setTasks([
-        {
-          id: "mindfulness",
-          title: "Mindfulness Session",
-          description: "Take a few minutes to meditate and clear your mind.",
-          icon: <Brain className="h-5 w-5" />,
-          type: "timer",
-          completed: false,
-          value: 0,
-        },
-        {
-          id: "growth",
-          title: "Growth Content",
-          description: "Read or listen to content that helps you grow.",
-          icon: <Book className="h-5 w-5" />,
-          type: "text",
-          completed: false,
-          value: "",
-        },
-        {
-          id: "hydration",
-          title: "Hydration",
-          description: "Track your water intake throughout the day.",
-          icon: <Droplets className="h-5 w-5" />,
-          type: "counter",
-          completed: false,
-          value: 0,
-          maxValue: 8, // Representing 8 glasses
-        },
-        {
-          id: "nutrition",
-          title: "Nutrition Check",
-          description: "How are your eating habits today?",
-          icon: <Apple className="h-5 w-5" />,
-          type: "checkbox",
-          completed: false,
-        },
-        {
-          id: "movement",
-          title: "Movement & Outdoors",
-          description: "30 minutes of movement with at least 15 minutes outdoors.",
-          icon: <Activity className="h-5 w-5" />,
-          type: "checkbox",
-          completed: false,
-        },
-        {
-          id: "digital",
-          title: "Digital Detox",
-          description: "Take a break from screens and disconnect.",
-          icon: <PhoneOff className="h-5 w-5" />,
-          type: "checkbox",
-          completed: false,
-        },
-      ]);
+       // Challenge not started, clear tasks
+        setTasks([]);
     }
   }, [challengeState.isStarted, challengeState.dailyProgress]);
 
+  // handleTaskComplete needs to input Task with icon, but save without
   const handleTaskComplete = (id: string, completed: boolean, value?: number | string) => {
-    const updatedTasks = tasks.map(task => 
+    const updatedTasks: Task[] = tasks.map(task => 
       task.id === id 
-        ? { ...task, completed, value: value !== undefined ? value : task.value } 
-        : task
+        ? { ...task, completed, value: value !== undefined ? value : task.value, icon: getIconForTask(task.id) } // Add icon back temporarily
+        : { ...task, icon: getIconForTask(task.id) } // Add icon back temporarily
     );
     
-    setTasks(updatedTasks);
-    
-    // Save progress
+    // Save progress (saveDailyProgress in context will strip icons before storing)
     const today = new Date().toISOString().split('T')[0];
     saveDailyProgress(today, updatedTasks);
   };
 
   const completedCount = tasks.filter(task => task.completed).length;
-  const completionPercentage = (completedCount / tasks.length) * 100;
+  const completionPercentage = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
   
   const today = new Date().toISOString().split('T')[0];
   const daysCompleted = Object.values(challengeState.dailyProgress).filter(day => day.completed).length;
@@ -165,13 +135,14 @@ const TasksPage = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* Map over tasks state and dynamically generate icon */} 
         {tasks.map((task) => (
           <TaskCard
             key={task.id}
             id={task.id}
             title={task.title}
             description={task.description}
-            icon={task.icon || <div />}
+            icon={getIconForTask(task.id) || <div />} // Get icon dynamically
             type={task.type}
             completed={task.completed}
             value={task.value}
