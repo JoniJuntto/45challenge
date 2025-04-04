@@ -30,12 +30,14 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { useChallenge } from "@/contexts/ChallengeContext";
 
 const Index = () => {
   const navigate = useNavigate();
   const [startDate, setStartDate] = useState<Date | undefined>(new Date());
   const [focusArea, setFocusArea] = useState("balance");
   const [step, setStep] = useState(1);
+  const { challengeState, startChallenge } = useChallenge();
 
   const handleStart = () => {
     if (!startDate) {
@@ -43,13 +45,24 @@ const Index = () => {
       return;
     }
     
-    // In a real app, we would save these settings to a backend or local storage
-    localStorage.setItem("thrive45_start_date", startDate.toISOString());
-    localStorage.setItem("thrive45_focus_area", focusArea);
-    
-    toast.success("Your 45-day challenge is set up!");
+    startChallenge();
     navigate("/tasks");
   };
+
+  // If the challenge has already started, redirect to tasks
+  if (challengeState.isStarted) {
+    return (
+      <div className="max-w-7xl mx-auto animate-fade-in text-center">
+        <h1 className="text-3xl font-bold mb-4">Your Thrive45 Challenge is Active</h1>
+        <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">
+          You're on day {challengeState.currentDay} of your 45-day challenge. Keep up the great work!
+        </p>
+        <Button size="lg" onClick={() => navigate('/tasks')}>
+          Go to Daily Tasks
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto animate-fade-in">
@@ -115,9 +128,9 @@ const Index = () => {
                   1
                 </div>
                 <div>
-                  <h3 className="font-medium">Set Your Start Date</h3>
+                  <h3 className="font-medium">Start Your Challenge</h3>
                   <p className="text-sm text-muted-foreground">
-                    Choose when you want to begin your 45-day journey to better habits.
+                    Begin your 45-day journey to better habits right away.
                   </p>
                 </div>
               </div>
@@ -176,77 +189,26 @@ const Index = () => {
         <div>
           <Card className="h-full">
             <CardHeader>
-              <CardTitle>{step === 1 ? "Start Your Journey" : "Choose Your Focus"}</CardTitle>
+              <CardTitle>Ready to Begin?</CardTitle>
             </CardHeader>
-            <CardContent>
-              {step === 1 ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">When would you like to start?</label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className="w-full justify-start text-left font-normal"
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {startDate ? format(startDate, "PPP") : "Select a date"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar
-                          mode="single"
-                          selected={startDate}
-                          onSelect={setStartDate}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  
-                  <p className="text-sm text-muted-foreground">
-                    Your 45-day challenge will end on {startDate ? format(new Date(startDate.getTime() + 44 * 24 * 60 * 60 * 1000), "MMMM d, yyyy") : "..."}
-                  </p>
-                  
-                  <Button className="w-full mt-4" onClick={() => setStep(2)}>
-                    Next: Choose Focus Area
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Start your Thrive45 Challenge today and transform your daily habits in just 45 days.
+                Complete all 6 tasks every day for 45 days straight. Miss a single day, and you'll 
+                need to start over from day 1.
+              </p>
+              
+              <div className="flex flex-col space-y-2 pt-4">
+                <Button className="w-full" onClick={handleStart}>
+                  Start 45-Day Challenge
+                </Button>
+                
+                {!useChallenge().user && (
+                  <Button variant="outline" className="w-full" onClick={() => navigate('/auth')}>
+                    Sign In to Save Progress
                   </Button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-1 block">
-                      What would you like to focus on during this challenge?
-                    </label>
-                    <Select value={focusArea} onValueChange={setFocusArea}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a focus area" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="balance">Overall Balance</SelectItem>
-                        <SelectItem value="mental">Mental Health</SelectItem>
-                        <SelectItem value="physical">Physical Fitness</SelectItem>
-                        <SelectItem value="stress">Stress Management</SelectItem>
-                        <SelectItem value="sleep">Sleep Improvement</SelectItem>
-                        <SelectItem value="focus">Focus & Productivity</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <p className="text-sm text-muted-foreground">
-                    We'll customize some of your tasks and prompts based on your focus area.
-                  </p>
-                  
-                  <div className="flex space-x-2 pt-4">
-                    <Button variant="outline" onClick={() => setStep(1)}>
-                      Back
-                    </Button>
-                    <Button className="flex-1" onClick={handleStart}>
-                      Begin 45-Day Challenge
-                    </Button>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

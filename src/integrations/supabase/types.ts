@@ -52,12 +52,18 @@ export type Database = {
           challenge_id: string
           created_at: string | null
           date: string
+          day_number: number | null
           diet_followed: boolean | null
+          digital_detox: boolean | null
           id: string
+          mindfulness_completed: boolean | null
+          mindfulness_value: number | null
           progress_photo_taken: boolean | null
           reading_completed: boolean | null
+          reading_notes: string | null
           updated_at: string | null
           water_consumed: boolean | null
+          water_glasses: number | null
           workout_1_completed: boolean | null
           workout_2_completed: boolean | null
         }
@@ -65,12 +71,18 @@ export type Database = {
           challenge_id: string
           created_at?: string | null
           date?: string
+          day_number?: number | null
           diet_followed?: boolean | null
+          digital_detox?: boolean | null
           id?: string
+          mindfulness_completed?: boolean | null
+          mindfulness_value?: number | null
           progress_photo_taken?: boolean | null
           reading_completed?: boolean | null
+          reading_notes?: string | null
           updated_at?: string | null
           water_consumed?: boolean | null
+          water_glasses?: number | null
           workout_1_completed?: boolean | null
           workout_2_completed?: boolean | null
         }
@@ -78,12 +90,18 @@ export type Database = {
           challenge_id?: string
           created_at?: string | null
           date?: string
+          day_number?: number | null
           diet_followed?: boolean | null
+          digital_detox?: boolean | null
           id?: string
+          mindfulness_completed?: boolean | null
+          mindfulness_value?: number | null
           progress_photo_taken?: boolean | null
           reading_completed?: boolean | null
+          reading_notes?: string | null
           updated_at?: string | null
           water_consumed?: boolean | null
+          water_glasses?: number | null
           workout_1_completed?: boolean | null
           workout_2_completed?: boolean | null
         }
